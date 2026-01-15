@@ -1960,21 +1960,25 @@ print("  ✓ Wall Check: Only aim at visible targets")
 print("  ✓ Mobile Support: Works on all platforms")
 
 ---------------------------------------------------------------------
--- GUN / TELEPORT TAB (WindUI) - WITH INTEGRATED PLAYER LIST
+-- GUN / TELEPORT TAB (WindUI) - PLAYER LIST INSIDE WINDUI
+---------------------------------------------------------------------
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+
+---------------------------------------------------------------------
+-- WINDUI TAB
 ---------------------------------------------------------------------
 local GunSection = Window:Section({ Title = "Ragdoll / Teleport", Opened = true })
 local GunTab = GunSection:Tab({
-    Title = "🌀Teleport🌀",
+    Title = "🌀 Teleport",
     Icon = "zap",
     Desc = "Shooter TP + Ragdoll Patches"
 })
 
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
-
--- SHOOTER TELEPORT (FIXED GUN NAMES)
+---------------------------------------------------------------------
+-- SHOOTER CONFIG
+---------------------------------------------------------------------
 local shooterTools = {
     ["Mist-19"] = true,
     ["Hydro-9"] = true,
@@ -1983,53 +1987,58 @@ local shooterTools = {
     ["M4"] = true
 }
 
-local playerButtons = {}
-local autoRefreshEnabled = false
-local refreshConnection = nil
-
+---------------------------------------------------------------------
+-- TELEPORT FUNCTION
+---------------------------------------------------------------------
 local function teleportToPlayer(player)
     if not player or not player.Character or not LocalPlayer.Character then return end
+
     local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
     local myRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
     if targetRoot and myRoot then
         myRoot.CFrame = targetRoot.CFrame + Vector3.new(0, 3, 0)
         WindUI:Notify({
             Title = "Teleport",
-            Content = "Teleported to: " .. player.DisplayName,
+            Content = "Teleported to: " .. player.DisplayName .. " [@" .. player.Name .. "]",
             Duration = 3
         })
     end
 end
 
+---------------------------------------------------------------------
+-- SHOOTER DETECTION
+---------------------------------------------------------------------
 local function hasShooterTool(player)
     if not player.Character then return false end
-    
-    -- Check Backpack
-    for _, tool in pairs(player.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and shooterTools[tool.Name] then 
-            return true, tool.Name
+
+    local function check(container)
+        for _, tool in ipairs(container:GetChildren()) do
+            if tool:IsA("Tool") and shooterTools[tool.Name] then
+                return true, tool.Name
+            end
         end
     end
-    
-    -- Check Character (equipped tools)
-    for _, tool in pairs(player.Character:GetChildren()) do
-        if tool:IsA("Tool") and shooterTools[tool.Name] then 
-            return true, tool.Name
-        end
+
+    local found, gun = check(player.Backpack)
+    if found then return true, gun end
+
+    found, gun = check(player.Character)
+    if found then return true, gun end
+
+    if player:FindFirstChild("StarterGear") then
+        found, gun = check(player.StarterGear)
+        if found then return true, gun end
     end
-    
-    -- Check StarterGear (persistent tools)
-    for _, tool in pairs(player.StarterGear:GetChildren()) do
-        if tool:IsA("Tool") and shooterTools[tool.Name] then 
-            return true, tool.Name
-        end
-    end
-    
-    return false, nil
+
+    return false
 end
 
+---------------------------------------------------------------------
+-- QUICK TELEPORT (FIRST SHOOTER)
+---------------------------------------------------------------------
 local function getShooter()
-    for _, player in pairs(Players:GetPlayers()) do
+    for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             local hasGun = hasShooterTool(player)
             if hasGun then
@@ -2037,49 +2046,39 @@ local function getShooter()
             end
         end
     end
-    return nil
 end
 
-local function refreshPlayerList()
-    -- Remove old buttons
-    for _, btn in pairs(playerButtons) do
-        if btn and btn.Destroy then
-            pcall(function() btn:Destroy() end)
-        end
-    end
-    playerButtons = {}
-    
-    local shootersFound = 0
-    
-    -- Add button for each player with gun
-    for _, player in pairs(Players:GetPlayers()) do
+---------------------------------------------------------------------
+-- WINDUI SHOOTER LIST
+---------------------------------------------------------------------
+local ShooterDropdown
+local ShooterMap = {}
+
+local function refreshShooterList()
+    ShooterMap = {}
+    local options = {}
+
+    for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             local hasGun, gunName = hasShooterTool(player)
             if hasGun then
-                shootersFound = shootersFound + 1
-                
-                local btn = GunTab:Button({
-                    Title = "📍 " .. player.DisplayName .. " [" .. gunName .. "]",
-                    Callback = function()
-                        teleportToPlayer(player)
-                    end
-                })
-                
-                table.insert(playerButtons, btn)
+                local label = player.DisplayName .. " [@" .. player.Name .. "] - " .. gunName
+                table.insert(options, label)
+                ShooterMap[label] = player
             end
         end
     end
-    
-    if shootersFound == 0 and autoRefreshEnabled then
-        WindUI:Notify({
-            Title = "Shooter List",
-            Content = "No shooters found",
-            Duration = 2
-        })
+
+    if #options == 0 then
+        options = { "No shooters detected" }
     end
+
+    ShooterDropdown:SetOptions(options)
 end
 
--- Quick Teleport Button
+---------------------------------------------------------------------
+-- WINDUI CONTROLS
+---------------------------------------------------------------------
 GunTab:Button({
     Title = "⚡ Quick Teleport to Shooter",
     Callback = function()
@@ -2090,96 +2089,42 @@ GunTab:Button({
             WindUI:Notify({
                 Title = "Teleport",
                 Content = "No shooter detected!",
-                Duration = 3
-            })
-        end
-    end
-})
-
-GunTab:Divider({ Title = "Player List" })
-
--- Auto-Refresh Toggle
-GunTab:Toggle({
-    Title = "🔄 Auto-Refresh Player List",
-    Value = false,
-    Callback = function(state)
-        autoRefreshEnabled = state
-        
-        if state then
-            -- Initial refresh
-            refreshPlayerList()
-            
-            -- Auto-refresh every 3 seconds
-            if refreshConnection then
-                refreshConnection:Disconnect()
-            end
-            
-            refreshConnection = task.spawn(function()
-                while autoRefreshEnabled do
-                    task.wait(3)
-                    if autoRefreshEnabled then
-                        refreshPlayerList()
-                    end
-                end
-            end)
-            
-            -- Refresh on player events
-            Players.PlayerAdded:Connect(function()
-                if autoRefreshEnabled then
-                    task.wait(1)
-                    refreshPlayerList()
-                end
-            end)
-            
-            Players.PlayerRemoving:Connect(function()
-                if autoRefreshEnabled then
-                    refreshPlayerList()
-                end
-            end)
-            
-            WindUI:Notify({
-                Title = "Auto-Refresh",
-                Content = "Player list will update every 3 seconds",
-                Duration = 3
-            })
-        else
-            -- Stop auto-refresh
-            if refreshConnection then
-                task.cancel(refreshConnection)
-                refreshConnection = nil
-            end
-            
-            -- Clear all player buttons
-            for _, btn in pairs(playerButtons) do
-                if btn and btn.Destroy then
-                    pcall(function() btn:Destroy() end)
-                end
-            end
-            playerButtons = {}
-            
-            WindUI:Notify({
-                Title = "Auto-Refresh",
-                Content = "Stopped",
                 Duration = 2
             })
         end
     end
 })
 
--- Manual Refresh Button
-GunTab:Button({
-    Title = "🔄 Refresh Player List Now",
-    Callback = function()
-        refreshPlayerList()
-        WindUI:Notify({
-            Title = "Refreshed",
-            Content = "Player list updated!",
-            Duration = 2
-        })
+ShooterDropdown = GunTab:Dropdown({
+    Title = "🎯 Shooter Players",
+    Values = { "Press refresh" },
+    Multi = false,
+    Callback = function(value)
+        local target = ShooterMap[value]
+        if target then
+            teleportToPlayer(target)
+        end
     end
 })
 
-GunTab:Divider({ Title = "Ragdoll Features" })
+GunTab:Button({
+    Title = "🔄 Refresh Shooter List",
+    Callback = function()
+        refreshShooterList()
+    end
+})
+
+---------------------------------------------------------------------
+-- AUTO REFRESH EVERY 2 SECONDS
+---------------------------------------------------------------------
+task.spawn(function()
+    while true do
+        task.wait(2)
+        if ShooterDropdown then
+            refreshShooterList()
+        end
+    end
+end)
 
 ---------------------------------------------------------------------
 -- RAGDOLL PATCHES
@@ -2212,49 +2157,44 @@ local function PatchRagdoll(char)
     if ragdollConnection then ragdollConnection:Disconnect() end
     ragdollConnection = ragdoll:GetPropertyChangedSignal("Value"):Connect(function()
         if ragdoll.Value then
-            if RagdollImmunity then
+            if RagdollImmunity or NoRagdollStandup then
                 recoverFromRagdoll(hum, ragdoll)
-                print("[Ragdoll Immunity] Blocked ragdoll completely")
-            elseif NoRagdollStandup then
-                recoverFromRagdoll(hum, ragdoll)
-                print("[No Ragdoll] Instant stand-up")
             end
         end
     end)
 end
 
+---------------------------------------------------------------------
+-- MOBILE PATCH
+---------------------------------------------------------------------
 local function PatchMobileButton()
     local gui = LocalPlayer:WaitForChild("PlayerGui", 5):FindFirstChild("MobileGui")
     if not gui then return end
+
     local buttons = gui:FindFirstChild("MobileButtons")
     if not buttons then return end
-    local ragdollButton = buttons:FindFirstChild("RagdollButton")
 
-    if ragdollButton then
-        if mobileConnection then mobileConnection:Disconnect() end
-        mobileConnection = ragdollButton.MouseButton1Click:Connect(function()
-            if (RagdollImmunity or NoRagdollStandup) and LocalPlayer.Character then
-                local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-                local ragdoll = LocalPlayer.Character:FindFirstChild("IsRagdoll")
-                if hum and ragdoll then
-                    recoverFromRagdoll(hum, ragdoll)
-                    WindUI:Notify({
-                        Title = "No Ragdoll",
-                        Content = (RagdollImmunity and "Immune" or "Instant Stand-Up") .. " applied",
-                        Duration = 2
-                    })
-                end
+    local ragdollButton = buttons:FindFirstChild("RagdollButton")
+    if not ragdollButton then return end
+
+    if mobileConnection then mobileConnection:Disconnect() end
+    mobileConnection = ragdollButton.MouseButton1Click:Connect(function()
+        if (RagdollImmunity or NoRagdollStandup) and LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            local ragdoll = LocalPlayer.Character:FindFirstChild("IsRagdoll")
+            if hum and ragdoll then
+                recoverFromRagdoll(hum, ragdoll)
             end
-        end)
-    end
+        end
+    end)
 end
 
+---------------------------------------------------------------------
+-- CHARACTER HOOKS
+---------------------------------------------------------------------
 LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(1)
     PatchRagdoll(char)
-    if autoRefreshEnabled then
-        refreshPlayerList()
-    end
 end)
 
 if LocalPlayer.Character then
@@ -2267,21 +2207,18 @@ LocalPlayer.PlayerGui.ChildAdded:Connect(function(child)
         PatchMobileButton()
     end
 end)
+
 PatchMobileButton()
 
+---------------------------------------------------------------------
+-- RAGDOLL TOGGLES
+---------------------------------------------------------------------
 GunTab:Toggle({
     Title = "🚫 No Ragdoll (Instant Stand-Up)",
     Value = false,
     Callback = function(state)
         NoRagdollStandup = state
-        if state then
-            RagdollImmunity = false
-            if LocalPlayer.Character then PatchRagdoll(LocalPlayer.Character) end
-            PatchMobileButton()
-            WindUI:Notify({Title="No Ragdoll", Content="Instant stand-up Enabled!"})
-        else
-            WindUI:Notify({Title="No Ragdoll", Content="Instant stand-up Disabled."})
-        end
+        if state then RagdollImmunity = false end
     end
 })
 
@@ -2290,14 +2227,7 @@ GunTab:Toggle({
     Value = false,
     Callback = function(state)
         RagdollImmunity = state
-        if state then
-            NoRagdollStandup = false
-            if LocalPlayer.Character then PatchRagdoll(LocalPlayer.Character) end
-            PatchMobileButton()
-            WindUI:Notify({Title="Ragdoll Immunity", Content="Full immunity Enabled!"})
-        else
-            WindUI:Notify({Title="Ragdoll Immunity", Content="Full immunity Disabled."})
-        end
+        if state then NoRagdollStandup = false end
     end
 })
 
