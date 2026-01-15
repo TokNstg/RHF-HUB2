@@ -1960,7 +1960,7 @@ print("  ✓ Wall Check: Only aim at visible targets")
 print("  ✓ Mobile Support: Works on all platforms")
 
 ---------------------------------------------------------------------
--- GUN / TELEPORT TAB (WindUI)
+-- GUN / TELEPORT TAB (WindUI) - WITH PLAYER LIST
 ---------------------------------------------------------------------
 local GunSection = Window:Section({ Title = "Ragdoll / Teleport", Opened = true })
 local GunTab = GunSection:Tab({
@@ -1972,9 +1972,19 @@ local GunTab = GunSection:Tab({
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
--- SHOOTER TELEPORT
-local shooterTools = {UZI=true, AK47=true, Shotgun=true, Pistol=true, M4=true}
+-- SHOOTER TELEPORT (FIXED GUN NAMES)
+local shooterTools = {
+    ["Mist-19"] = true,
+    ["Hydro-9"] = true,
+    ["Shower-12"] = true,
+    ["Aqua-47"] = true,
+    ["M4"] = true
+}
+
+local shooterListGui = nil
+local autoRefreshConnection = nil
 
 local function teleportToPlayer(player)
     if not player or not player.Character or not LocalPlayer.Character then return end
@@ -1984,28 +1994,249 @@ local function teleportToPlayer(player)
         myRoot.CFrame = targetRoot.CFrame + Vector3.new(0, 3, 0)
         WindUI:Notify({
             Title = "Teleport",
-            Content = "Teleported to Shooter: " .. player.DisplayName .. " [@" .. player.Name .. "]",
+            Content = "Teleported to: " .. player.DisplayName .. " [@" .. player.Name .. "]",
             Duration = 4
         })
     end
 end
 
+local function hasShooterTool(player)
+    if not player.Character then return false end
+    
+    -- Check Backpack
+    for _, tool in pairs(player.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and shooterTools[tool.Name] then 
+            return true, tool.Name
+        end
+    end
+    
+    -- Check Character (equipped tools)
+    for _, tool in pairs(player.Character:GetChildren()) do
+        if tool:IsA("Tool") and shooterTools[tool.Name] then 
+            return true, tool.Name
+        end
+    end
+    
+    -- Check StarterGear (persistent tools)
+    for _, tool in pairs(player.StarterGear:GetChildren()) do
+        if tool:IsA("Tool") and shooterTools[tool.Name] then 
+            return true, tool.Name
+        end
+    end
+    
+    return false, nil
+end
+
 local function getShooter()
     for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            for _, tool in pairs(player.Backpack:GetChildren()) do
-                if tool:IsA("Tool") and shooterTools[tool.Name] then return player end
-            end
-            for _, tool in pairs(player.Character:GetChildren()) do
-                if tool:IsA("Tool") and shooterTools[tool.Name] then return player end
+        if player ~= LocalPlayer then
+            local hasGun, gunName = hasShooterTool(player)
+            if hasGun then
+                return player
             end
         end
     end
     return nil
 end
 
+local function refreshShooterList()
+    if not shooterListGui then return end
+    
+    local scroll = shooterListGui:FindFirstChild("ScrollingFrame")
+    if not scroll then return end
+    
+    -- Clear existing buttons
+    for _, child in ipairs(scroll:GetChildren()) do
+        if not child:IsA("UIListLayout") then
+            child:Destroy()
+        end
+    end
+    
+    local shootersFound = 0
+    
+    -- Add buttons for each player with a gun
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local hasGun, gunName = hasShooterTool(player)
+            if hasGun then
+                shootersFound = shootersFound + 1
+                
+                local button = Instance.new("TextButton")
+                button.Size = UDim2.new(1, -10, 0, 40)
+                button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+                button.BorderSizePixel = 0
+                button.Font = Enum.Font.SourceSansBold
+                button.TextSize = 16
+                button.TextColor3 = Color3.fromRGB(255, 255, 255)
+                button.Text = player.DisplayName .. " [@" .. player.Name .. "] - " .. gunName
+                button.Parent = scroll
+                
+                -- Hover effect
+                button.MouseEnter:Connect(function()
+                    button.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+                end)
+                button.MouseLeave:Connect(function()
+                    button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+                end)
+                
+                -- Teleport on click
+                button.MouseButton1Click:Connect(function()
+                    teleportToPlayer(player)
+                end)
+            end
+        end
+    end
+    
+    -- Update counter
+    local counter = shooterListGui:FindFirstChild("Counter")
+    if counter then
+        counter.Text = "Shooters Found: " .. shootersFound
+    end
+    
+    -- Show message if no shooters
+    if shootersFound == 0 then
+        local noShooters = Instance.new("TextLabel")
+        noShooters.Size = UDim2.new(1, 0, 0, 60)
+        noShooters.BackgroundTransparency = 1
+        noShooters.Text = "No shooters detected!"
+        noShooters.TextColor3 = Color3.fromRGB(200, 200, 200)
+        noShooters.Font = Enum.Font.SourceSansItalic
+        noShooters.TextSize = 18
+        noShooters.Parent = scroll
+    end
+end
+
+local function createShooterListGui()
+    if shooterListGui then 
+        shooterListGui:Destroy()
+    end
+    
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ShooterListGui"
+    gui.ResetOnSpawn = false
+    gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    shooterListGui = gui
+    
+    local main = Instance.new("Frame")
+    main.Name = "Main"
+    main.Size = UDim2.new(0, 400, 0, 500)
+    main.Position = UDim2.new(0.5, -200, 0.5, -250)
+    main.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    main.BorderSizePixel = 0
+    main.Active = true
+    main.Draggable = true
+    main.Parent = gui
+    
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -40, 0, 40)
+    title.Position = UDim2.new(0, 10, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "🎯 Shooter Teleport List"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.Font = Enum.Font.SourceSansBold
+    title.TextSize = 20
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = main
+    
+    -- Close Button
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 30, 0, 30)
+    closeBtn.Position = UDim2.new(1, -35, 0, 5)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.Font = Enum.Font.SourceSansBold
+    closeBtn.TextSize = 18
+    closeBtn.Parent = main
+    closeBtn.MouseButton1Click:Connect(function()
+        gui:Destroy()
+        shooterListGui = nil
+        if autoRefreshConnection then
+            autoRefreshConnection:Disconnect()
+            autoRefreshConnection = nil
+        end
+    end)
+    
+    -- Counter
+    local counter = Instance.new("TextLabel")
+    counter.Name = "Counter"
+    counter.Size = UDim2.new(1, -20, 0, 25)
+    counter.Position = UDim2.new(0, 10, 0, 45)
+    counter.BackgroundTransparency = 1
+    counter.Text = "Shooters Found: 0"
+    counter.TextColor3 = Color3.fromRGB(200, 200, 200)
+    counter.Font = Enum.Font.SourceSansItalic
+    counter.TextSize = 16
+    counter.TextXAlignment = Enum.TextXAlignment.Left
+    counter.Parent = main
+    
+    -- Refresh Button
+    local refreshBtn = Instance.new("TextButton")
+    refreshBtn.Size = UDim2.new(0, 100, 0, 30)
+    refreshBtn.Position = UDim2.new(1, -110, 0, 42)
+    refreshBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+    refreshBtn.Text = "🔄 Refresh"
+    refreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    refreshBtn.Font = Enum.Font.SourceSansBold
+    refreshBtn.TextSize = 14
+    refreshBtn.Parent = main
+    refreshBtn.MouseButton1Click:Connect(refreshShooterList)
+    
+    -- Scrolling Frame
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -20, 1, -85)
+    scroll.Position = UDim2.new(0, 10, 0, 75)
+    scroll.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 8
+    scroll.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 100)
+    scroll.Parent = main
+    
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 5)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = scroll
+    
+    -- Auto-refresh every 2 seconds
+    if autoRefreshConnection then
+        autoRefreshConnection:Disconnect()
+    end
+    autoRefreshConnection = RunService.Heartbeat:Connect(function()
+        if shooterListGui and shooterListGui.Parent then
+            task.wait(2)
+            refreshShooterList()
+        else
+            if autoRefreshConnection then
+                autoRefreshConnection:Disconnect()
+                autoRefreshConnection = nil
+            end
+        end
+    end)
+    
+    -- Initial refresh
+    refreshShooterList()
+    
+    -- Refresh when players join/leave
+    Players.PlayerAdded:Connect(function()
+        task.wait(1)
+        if shooterListGui then refreshShooterList() end
+    end)
+    
+    Players.PlayerRemoving:Connect(function()
+        if shooterListGui then refreshShooterList() end
+    end)
+    
+    WindUI:Notify({
+        Title = "Shooter List",
+        Content = "Player list opened! Auto-refreshing every 2 seconds.",
+        Duration = 4
+    })
+end
+
+-- Quick Teleport Button
 GunTab:Button({
-    Title = "Teleport to Shooter",
+    Title = "⚡ Quick Teleport to Shooter",
     Callback = function()
         local shooter = getShooter()
         if shooter then
@@ -2016,6 +2247,26 @@ GunTab:Button({
                 Content = "No shooter detected!",
                 Duration = 3
             })
+        end
+    end
+})
+
+-- Player List Toggle
+GunTab:Toggle({
+    Title = "📋 Show Shooter List",
+    Value = false,
+    Callback = function(state)
+        if state then
+            createShooterListGui()
+        else
+            if shooterListGui then
+                shooterListGui:Destroy()
+                shooterListGui = nil
+            end
+            if autoRefreshConnection then
+                autoRefreshConnection:Disconnect()
+                autoRefreshConnection = nil
+            end
         end
     end
 })
@@ -2851,3 +3102,4 @@ showPlayersToggle = PlayerListTab:Toggle({
         end
     end
 })
+.
