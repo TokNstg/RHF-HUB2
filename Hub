@@ -1960,11 +1960,11 @@ print("  ✓ Wall Check: Only aim at visible targets")
 print("  ✓ Mobile Support: Works on all platforms")
 
 ---------------------------------------------------------------------
--- GUN / TELEPORT TAB (WindUI) - PLAYER LIST INSIDE WINDUI
+-- SERVICES
 ---------------------------------------------------------------------
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
 
 ---------------------------------------------------------------------
 -- WINDUI TAB
@@ -1977,7 +1977,7 @@ local GunTab = GunSection:Tab({
 })
 
 ---------------------------------------------------------------------
--- SHOOTER CONFIG
+-- SHOOTER TOOLS
 ---------------------------------------------------------------------
 local shooterTools = {
     ["Mist-19"] = true,
@@ -2000,104 +2000,35 @@ local function teleportToPlayer(player)
         myRoot.CFrame = targetRoot.CFrame + Vector3.new(0, 3, 0)
         WindUI:Notify({
             Title = "Teleport",
-            Content = "Teleported to: " .. player.DisplayName .. " [@" .. player.Name .. "]",
-            Duration = 3
+            Content = "Teleported to " .. player.DisplayName,
+            Duration = 2
         })
     end
 end
 
 ---------------------------------------------------------------------
--- SHOOTER DETECTION
+-- SHOOTER DETECTION (CHARACTER ONLY – REPLICATED)
 ---------------------------------------------------------------------
-local function hasShooterTool(player)
+local function hasShooterGun(player)
     if not player.Character then return false end
 
-    local function check(container)
-        for _, tool in ipairs(container:GetChildren()) do
-            if tool:IsA("Tool") and shooterTools[tool.Name] then
-                return true, tool.Name
-            end
+    for _, item in ipairs(player.Character:GetChildren()) do
+        if item:IsA("Tool") and shooterTools[item.Name] then
+            return true, item.Name
         end
     end
-
-    local found, gun = check(player.Backpack)
-    if found then return true, gun end
-
-    found, gun = check(player.Character)
-    if found then return true, gun end
-
-    if player:FindFirstChild("StarterGear") then
-        found, gun = check(player.StarterGear)
-        if found then return true, gun end
-    end
-
     return false
 end
 
 ---------------------------------------------------------------------
--- QUICK TELEPORT (FIRST SHOOTER)
----------------------------------------------------------------------
-local function getShooter()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local hasGun = hasShooterTool(player)
-            if hasGun then
-                return player
-            end
-        end
-    end
-end
-
----------------------------------------------------------------------
--- WINDUI SHOOTER LIST
+-- WINDUI DROPDOWN (AUTO REFRESH)
 ---------------------------------------------------------------------
 local ShooterDropdown
 local ShooterMap = {}
 
-local function refreshShooterList()
-    ShooterMap = {}
-    local options = {}
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local hasGun, gunName = hasShooterTool(player)
-            if hasGun then
-                local label = player.DisplayName .. " [@" .. player.Name .. "] - " .. gunName
-                table.insert(options, label)
-                ShooterMap[label] = player
-            end
-        end
-    end
-
-    if #options == 0 then
-        options = { "No shooters detected" }
-    end
-
-    ShooterDropdown:SetOptions(options)
-end
-
----------------------------------------------------------------------
--- WINDUI CONTROLS
----------------------------------------------------------------------
-GunTab:Button({
-    Title = "⚡ Quick Teleport to Shooter",
-    Callback = function()
-        local shooter = getShooter()
-        if shooter then
-            teleportToPlayer(shooter)
-        else
-            WindUI:Notify({
-                Title = "Teleport",
-                Content = "No shooter detected!",
-                Duration = 2
-            })
-        end
-    end
-})
-
 ShooterDropdown = GunTab:Dropdown({
-    Title = "🎯 Shooter Players",
-    Values = { "Press refresh" },
+    Title = "🎯 Shooter Players (Auto)",
+    Values = { "Scanning..." },
     Multi = false,
     Callback = function(value)
         local target = ShooterMap[value]
@@ -2107,24 +2038,62 @@ ShooterDropdown = GunTab:Dropdown({
     end
 })
 
-GunTab:Button({
-    Title = "🔄 Refresh Shooter List",
-    Callback = function()
-        refreshShooterList()
+---------------------------------------------------------------------
+-- REFRESH LIST (NO SetOptions BUG)
+---------------------------------------------------------------------
+local function refreshShooterList()
+    ShooterMap = {}
+    local list = {}
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local hasGun, gunName = hasShooterGun(player)
+            if hasGun then
+                local label = player.DisplayName .. " [@" .. player.Name .. "] - " .. gunName
+                table.insert(list, label)
+                ShooterMap[label] = player
+            end
+        end
     end
-})
+
+    if #list == 0 then
+        list = { "No shooters detected" }
+    end
+
+    ShooterDropdown:Refresh(list)
+end
 
 ---------------------------------------------------------------------
--- AUTO REFRESH EVERY 2 SECONDS
+-- AUTO REFRESH LOOP
 ---------------------------------------------------------------------
 task.spawn(function()
     while true do
-        task.wait(2)
-        if ShooterDropdown then
-            refreshShooterList()
-        end
+        task.wait(1.5)
+        refreshShooterList()
     end
 end)
+
+---------------------------------------------------------------------
+-- QUICK TELEPORT
+---------------------------------------------------------------------
+GunTab:Button({
+    Title = "⚡ Teleport to First Shooter",
+    Callback = function()
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                if hasShooterGun(player) then
+                    teleportToPlayer(player)
+                    return
+                end
+            end
+        end
+        WindUI:Notify({
+            Title = "Teleport",
+            Content = "No shooter found",
+            Duration = 2
+        })
+    end
+})
 
 ---------------------------------------------------------------------
 -- RAGDOLL PATCHES
@@ -2165,7 +2134,7 @@ local function PatchRagdoll(char)
 end
 
 ---------------------------------------------------------------------
--- MOBILE PATCH
+-- MOBILE RAGDOLL BUTTON PATCH
 ---------------------------------------------------------------------
 local function PatchMobileButton()
     local gui = LocalPlayer:WaitForChild("PlayerGui", 5):FindFirstChild("MobileGui")
